@@ -22,16 +22,21 @@ int main() {
     char *args[10];
 
     while (1) {
-        printf("myshell> ");
+        char cwd[256];
+        getcwd(cwd, sizeof(cwd));
+        printf("%s> ", cwd);
         if (fgets(input, sizeof(input), stdin) == NULL) {
             break;
         }
         // Ersetze \n mit \0
         input[strcspn(input, "\n")] = '\0';
         parse_input(input, args);
+        
+        if (args[0] == NULL) {
+            continue;
+        }
 
-
-        if (strcmp(input, "exit") == 0) {
+        if (strcmp(args[0], "exit") == 0) {
             break;
         }
 
@@ -40,9 +45,8 @@ int main() {
                 fprintf(stderr, "cd: fehlender Pfad\n");
             } else {
                 chdir(args[1]);
-                continue;
             }
-            
+            continue; 
         }
         
         pid_t pid = fork();
