@@ -1,0 +1,13 @@
+# Build-Artefakte
+*.o
+*.d
+myshell
+
+# Debug/Sanitizer-Builds
+*.dSYM/
+
+# Editor/OS
+*.swp
+.vscode/
+.idea/
+*~
