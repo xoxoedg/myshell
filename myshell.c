@@ -4,6 +4,13 @@
 #include <unistd.h>
 #include <sys/wait.h>
 
+
+void print_prompt() {
+    char cwd[256];
+    getcwd(cwd, sizeof(cwd));
+    printf("%s> ", cwd);
+}
+
 void parse_input(char *input, char *args[]) {
     int i = 0;
     char *token = strtok(input, " ");
