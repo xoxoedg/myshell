@@ -4,18 +4,26 @@
 #include <unistd.h>
 #include <sys/wait.h>
 
-char* check_chaining(char *input) {
+char* find_and_split(char *input, int *isAnd) {
     // Gibt Startpointer von Substring zurück 
     char* pos = strstr(input, "&&");
 
     if (pos == NULL) {
-        return NULL;
+        // Falls kein &&, schaue ob || gibt
+        pos = strstr(input, "||");
+        if (pos == NULL) {
+            return NULL;
+        } else {
+            *isAnd = 0;
+        }
+    } else {
+        *isAnd = 1;
     }
      // Ersetze durch null byte
-     // Speicheradresse von input nun vor && begrenzt durch null byte
+     // Speicheradresse von input nun vor && / || begrenzt durch null byte
+    
     *pos = '\0';
     return pos + 3;
-    
 }
 
 void print_prompt() {
@@ -64,15 +72,27 @@ int handle_builtin(char *args[]) {
         
 }
 
+int run_command(char* args[]) {
+    pid_t pid = fork();
+    if (pid == 0) {
+        execvp(args[0], args);
+        perror("execvp fehlgeschlagen");
+        exit(1);
+    }
+
+    int status;
+    wait(&status);
+
+    if (WIFEXITED(status) ) {
+        return WEXITSTATUS(status);
+    }
+    return -1;
+} 
+
 int main() {
     char input[256];
     char *args[10];
-
-   /*  char test[] = "ls && echo hello";
-    char *second = check_chaining(test);
-
-    printf("Erstens: %s\n", test);
-    printf("Zweitens: %s\n", second); */
+    int isAnd;
 
     while (1) {
         print_prompt();
@@ -80,7 +100,7 @@ int main() {
         if (read_input(input, sizeof(input)) == 1) {
             break;
         }
-        
+        char* second_command = find_and_split(input, &isAnd);
         parse_input(input, args);
         
         if (args[0] == NULL) {
@@ -90,17 +110,19 @@ int main() {
         if (handle_builtin(args) == 1) {
             continue;
         }
-    
-        pid_t pid = fork();
+        
+        int exit_code = run_command(args);
 
-        if (pid == 0) {
-            execvp(args[0], args);
-            perror("execvp fehlgeschlagen");   
-            exit(1);                        
-        } else {
-            wait(NULL);
+        if (second_command != NULL) {
+            int is_success = (exit_code == 0);
+               if ((isAnd && is_success) || (!isAnd && !is_success)) {
+                    parse_input(second_command, args);
+                    run_command(args); 
+                }
+            }
         }
-    }
-
     return 0;
 }
+
+  
+
