@@ -11,3 +11,6 @@ myshell
 .vscode/
 .idea/
 *~
+
+bin/
+obj/
