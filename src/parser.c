@@ -2,7 +2,60 @@
 #include <string.h>
 // Return 0 isPipe False
 // Return 1 isPipe True
-int split_pipe_to_buffers(char *input, char *cmd1, char *cmd2) {
+
+char* l_strip(char *token) {
+    int count = 0;
+    while (token[count] == ' ') {
+        count++;
+    }
+    return token + count;
+}
+
+char* r_strip(char *token) {
+    int length = strlen(token); 
+    int last_char_index = length - 1;
+    while (last_char_index >= 0 && token[last_char_index] == ' ') {
+        last_char_index--;
+    }
+    token[last_char_index+1] = '\0';    
+    return token;
+}
+
+char* strip(char *token) {
+    return r_strip(l_strip(token));
+}
+
+
+char** split_pipe_to_buffers2(char *input, int* commands_count) {
+    int capacity = 4;
+    int count = 0;
+    char **commands = malloc(capacity * sizeof(char*));
+    if (commands == NULL) {
+        perror("malloc fehlgeschlagen");
+        exit(1);
+    }
+    
+    char* token = strtok(input, "|");
+    while(token != NULL) {
+        if (count >= capacity) {
+            capacity *= 2;
+            commands = realloc(commands, capacity * sizeof(char*));
+            if (commands == NULL) {
+                perror("realloc fehlgeschlagen");
+                exit(1);
+            }
+        }
+        commands[count] = strip(token);
+        count++;
+        token = strtok(NULL, "|");
+        
+    }
+    *commands_count = count;
+    return commands;
+}
+
+
+int split_pipe_to_buffers(char *input, char *commands[], int* commands_count) {
     char* pos = strstr(input, "|");
 
     if (pos == NULL) {
