@@ -1,124 +1,145 @@
-#include <unistd.h>
-#include <sys/wait.h>
-#include <stdio.h>
-#include "parser.h"
 #include "builtins.h"
+#include "parser.h"
+#include <stddef.h>
+#include <stdio.h>
 #include <stdlib.h>
+#include <sys/wait.h>
+#include <unistd.h>
+
+void clean_pipes_in_child(int child_id, int commands_count, int (*pipes)[2]) {
+    for (int j = 0; j < commands_count - 1; j++) {
+        if (j != child_id - 1) {
+            close(pipes[j][0]);
+        }
+        if (j != child_id) {
+            close(pipes[j][1]);
+        }
+    }
+}
 
 // 0 Erfolg -1 Missefolg
-int run_single_command(char* input, int* was_builtin) {
+void execute_in_child(char *input, int *was_builtin) {
     char *args[10];
     parse_input(input, args);
 
     if (args[0] == NULL) {
-        return 0;
+        exit(0);
     }
     int exitcode = handle_builtin(args, was_builtin);
     if (*was_builtin == 1) {
-        return exitcode;
+        exit(exitcode);
     }
+    execvp(args[0], args);
+    perror("execvp fehlgeschlagen");
+    exit(1);
+}
 
-
-
+int run_single_command(char *input, int *was_builtin) {
     pid_t pid = fork();
     if (pid == 0) {
-        execvp(args[0], args);
-        perror("execvp fehlgeschlagen");
-        exit(1);
+        execute_in_child(input, was_builtin);
     }
 
     int status;
     wait(&status);
 
-    if (WIFEXITED(status) ) {
+    if (WIFEXITED(status)) {
         return WEXITSTATUS(status);
     }
     return -1;
-} 
+}
 
-int run_pipeline(char* cmd1_buf, char* cmd2_buf, int* was_builtin) {
-    int pipefd[2];
-    pid_t pid1, pid2;
-    char* args[10];
-    char* args2[10];
-
-
-    if (pipe(pipefd) == -1) {
-        perror("pipe fehlgeschlagen");
-        return -1;
+void close_pipes_in_parent(int commands_count, int (*pipes)[2]) {
+    for (int i = 0; i < commands_count - 1; i++) {
+        close(pipes[i][0]);
+        close(pipes[i][1]);
     }
+}
 
-    // --------------------------------------------------
-    // KIND 1: Führt den ersten Befehl aus (schreibt in Pipe)
-    // --------------------------------------------------
-    pid1 = fork();
+void configurer_pipeline(int i, int commands_count, int (*pipes)[2]) {
+    if (i == 0) {
+        clean_pipes_in_child(i, commands_count, pipes);
+        // Vor dup2
+        // fd-Tabelle (dieser Prozess):
+        // fd 1 (stdout)     → Open File Description A → Terminal
+        // fd pipes[i][1]    → Open File Description B → Pipe-Puffer
+        dup2(pipes[i][1], STDOUT_FILENO);
+        // Nach dup2
+        // fd-Tabelle (dieser Prozess):
+        // fd 1 (stdout)     → Open File Description B → Pipe-Puffer   (GEÄNDERT)
+        // fd pipes[i][1]    → Open File Description B → Pipe-Puffer   (unverändert, ZEIGT
+        // AUF DASSELBE B!)
+        close(pipes[i][1]);
+    } else if (i == commands_count - 1) {
+        clean_pipes_in_child(i, commands_count, pipes);
+        dup2(pipes[i - 1][0], STDIN_FILENO);
+        close(pipes[i - 1][0]);
+    } else {
+        clean_pipes_in_child(i, commands_count, pipes);
+        dup2(pipes[i][1], STDOUT_FILENO);
+        dup2(pipes[i - 1][0], STDIN_FILENO);
+        close(pipes[i - 1][0]);
+        close(pipes[i][1]);
+    }
+}
 
-    if (pid1==0) {
-        // Lese Ende schließen
-        close(pipefd[0]);
-        // STDOUT FD bleibt auf 1. Nur wohin dieser pointed (file) wird verändert
-        dup2(pipefd[1], STDOUT_FILENO);
-        close(pipefd[1]);
-        parse_input(cmd1_buf, args);
+int run_pipeline(char **commands, int commands_count, int *was_builtin) {
+    int (*pipes)[2] = malloc((commands_count - 1) * sizeof(int[2]));
+    pid_t *pids = malloc(commands_count * sizeof(pid_t));
 
-        if (args[0] == 0) {
-            exit(0);
-        }
-
-        int exit_code = handle_builtin(args, was_builtin);
-        if (*was_builtin) {
-            exit(exit_code);
-        }
-
-        execvp(args[0], args);
-        perror("execvp fehlgeschlagen");
+    if (pipes == NULL) {
+        perror("pipe malloc fehlgeschlagen");
         exit(1);
     }
-    // Wieder Elternprozess
-    pid2 = fork();
 
-    if (pid2 == 0) {
-        close(pipefd[1]);
-        dup2(pipefd[0], STDIN_FILENO);
-        close(pipefd[0]);
-        parse_input(cmd2_buf, args2);
-
-        if (args2[0] == 0) {
-            exit(0);
-        }
-
-        int exit_code = handle_builtin(args2, was_builtin);
-        if (*was_builtin) {
-            exit(exit_code);
-        }
-
-        execvp(args2[0], args2);
-        perror("execvp fehlgeschlagen");
+    if (pids == NULL) {
+        perror("pid malloc fehlgeschlagen");
         exit(1);
-
     }
 
-    close(pipefd[0]);
-    close(pipefd[1]);
+    for (int i = 0; i < commands_count - 1; i++) {
+        if (pipe(pipes[i]) == -1) {
+            perror("creating pipes failed");
+            exit(1);
+        }
+    }
 
-    int status1, status2;
-    waitpid(pid1, &status1, 0);
-    waitpid(pid2, &status2, 0);
+    for (int i = 0; i < commands_count; i++) {
+        pids[i] = fork();
+        if (pids[i] == 0) {
+            configurer_pipeline(i, commands_count, pipes);
+            execute_in_child(commands[i], was_builtin);
+        }
+    }
+    close_pipes_in_parent(commands_count, pipes);
 
-    return WIFEXITED(status2) ? WEXITSTATUS(status2) : -1;
- 
+    int status;
+    for (int i = 0; i < commands_count; i++) {
+        waitpid(pids[i], &status, 0);
+    }
+
+    free(pids);
+    free(pipes);
+
+    if (WIFEXITED(status)) {
+        return (WEXITSTATUS(status));
+    }
+    return -1;
 }
 
 int execute_commands(char *cmd_str) {
-    char cmd1_buf[256];
-    char cmd2_buf[256];
     int was_builtin;
+    int count;
+    int result;
 
-    int is_pipe = split_pipe_to_buffers(cmd_str, cmd1_buf, cmd2_buf);
+    char **commands = split_pipes(cmd_str, &count);
 
-    if(is_pipe == 1) {
-        return run_pipeline(cmd1_buf, cmd2_buf, &was_builtin);
+    if (count == 1) {
+        result = run_single_command(commands[0], &was_builtin);
     } else {
-        return run_single_command(cmd1_buf, &was_builtin);
+        result = run_pipeline(commands, count, &was_builtin);
     }
+
+    free(commands);
+    return result;
 }
