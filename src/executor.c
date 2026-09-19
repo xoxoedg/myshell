@@ -18,26 +18,28 @@ void clean_pipes_in_child(int child_id, int commands_count, int (*pipes)[2]) {
 }
 
 // 0 Erfolg -1 Missefolg
-void execute_in_child(char *input, int *was_builtin) {
-    char *args[10];
-    parse_input(input, args);
-
-    if (args[0] == NULL) {
-        exit(0);
-    }
-    int exitcode = handle_builtin(args, was_builtin);
-    if (*was_builtin == 1) {
-        exit(exitcode);
-    }
+void execute_in_child(char *args[]) {
     execvp(args[0], args);
     perror("execvp fehlgeschlagen");
     exit(1);
 }
 
 int run_single_command(char *input, int *was_builtin) {
+    char *args[10];
+    parse_input(input, args);
+
+    if (args[0] == NULL) {
+        return 0;
+    }
+    int exitcode = handle_builtin(args, was_builtin);
+    if (*was_builtin == 1) {
+        return exitcode;
+    }
+
     pid_t pid = fork();
+
     if (pid == 0) {
-        execute_in_child(input, was_builtin);
+        execute_in_child(args);
     }
 
     int status;
@@ -108,9 +110,23 @@ int run_pipeline(char **commands, int commands_count, int *was_builtin) {
         pids[i] = fork();
         if (pids[i] == 0) {
             configurer_pipeline(i, commands_count, pipes);
-            execute_in_child(commands[i], was_builtin);
+
+            char *args[10];
+            parse_input(commands[i], args);
+
+            if (args[0] == NULL) {
+                exit(0);
+            }
+
+            int exitcode = handle_builtin(args, was_builtin);
+            if (*was_builtin == 1) {
+                exit(exitcode);
+            }
+
+            execute_in_child(args);
         }
     }
+
     close_pipes_in_parent(commands_count, pipes);
 
     int status;
