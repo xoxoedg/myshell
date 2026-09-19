@@ -11,3 +11,9 @@ myshell
 .vscode/
 .idea/
 *~
+
+bin/
+obj/
+.cache
+compile_commands.json
+.clang-format
